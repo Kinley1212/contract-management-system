@@ -116,11 +116,17 @@ ContractSystem_v2.gs
 
 ## Screenshots
 
-<!-- Add screenshots to docs/ and uncomment:
+**Search / Sync** — multi-condition search with one-click Drive sync
+
 ![Search interface](./docs/screenshot-search.png)
+
+**Upload / File** — auto-assigned Contract ID previewed before upload
+
 ![Upload and filing](./docs/screenshot-upload.png)
+
+**AI Assistant** — natural-language query with RAG retrieval, returning structured results and clickable Drive links (contract details redacted)
+
 ![AI assistant](./docs/screenshot-ai.png)
--->
 
 ---
 
