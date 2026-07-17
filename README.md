@@ -1,107 +1,113 @@
-# 合約管理系統
+## Project Overview
 
-> 個人工作產出 — 為公司設計並獨立實現的合約管理平台
+This is an **internal contract management system** developed independently as a personal work output for my employer.
 
-一套基於 Google Apps Script 的全端合約管理系統，整合 Google Drive 雲端存檔、Google Sheets 資料庫與 Gemini AI，提供合約上傳建檔、多維搜索及 AI 智能問答三大功能，並以密碼保護的網頁作為操作入口。
+The system provides a serverless, password-protected web interface for uploading, indexing, and searching company contracts, with an AI assistant for natural-language queries. All data lives in Google Workspace — no external server required.
 
----
-
-## 功能概覽
-
-### 🔍 搜尋 / 同步
-- 支援 Contract ID（新舊編號）、公司名稱、合約全文關鍵字三維搜索
-- 一鍵快速同步，自動掃描 Google Drive 新增及已刪除文件
-
-### 📤 上傳 / 建檔
-- 支援 PDF、Word（.doc / .docx），上限 8MB
-- 系統自動分配 Contract ID（`公司代碼-0001` 格式），可手動覆寫
-- 上傳後自動：提取全文 → AI 識別舊合約編號 → 寫入試算表
-
-### 🤖 AI 助理（RAG 雙層搜索）
-- 自然語言提問，例如「找所有跟贊助有關的合約」
-- **第一層**：搜索合約 ID、公司名稱、日期、舊 ID（結構化欄位）
-- **第二層**：搜索合約原文全文（`_FullTextData` 快取）
-- 回覆自動附上 Google Drive 可點擊連結
-
-### 📖 左側說明書側欄
-- 點擊展開，不遮蓋主系統畫面
-- 涵蓋 Drive 結構、Sheets 欄位說明、三大功能操作指引
+Built end to end as a solo project: system architecture, AI integration, RAG pipeline, frontend UI, and deployment.
 
 ---
 
-## 技術架構
+## Approach & Methods
 
-| 層級 | 技術 |
-|---|---|
-| 前端 | HTML / CSS / JavaScript（內嵌於 Apps Script） |
-| 後端 | Google Apps Script（無伺服器） |
-| 資料庫 | Google Sheets（主表 + 全文索引表 + 公司代碼表） |
-| 文件存儲 | Google Drive |
-| AI | Gemini API（`gemini-flash-latest`） |
-| 文字提取 | Google Drive OCR（PDF / Word 轉 Google Docs） |
+- **Storage & Database:**
+  - Contracts stored in Google Drive, organized by company folder
+  - Google Sheets used as the database (main table, full-text index, company code map)
+  - Text extracted from PDF and Word files via Google Drive OCR (converting to Google Docs and reading the body text)
 
----
+- **AI Integration (RAG):**
+  - Implemented a two-layer retrieval pipeline before passing context to Gemini
+  - Layer 1: keyword match against structured fields (Contract ID, company name, date, old ID)
+  - Layer 2: keyword match against full extracted text cached in a hidden sheet (`_FullTextData`)
+  - Matched contracts (up to 5, 1500 chars each) sent as context to Gemini; responses include clickable Drive links
 
-## Google Sheets 結構
+- **Web Interface:**
+  - Full HTML/CSS/JS UI embedded in a single Apps Script `doGet()` function
+  - Three-tab layout: Search/Sync, Upload/File, AI Assistant
+  - Left-side slide-out documentation panel that does not overlay the main content
+  - Password gate before the main interface
 
-**主表 `contract`（8 欄）**
-
-| 欄位 | 說明 |
-|---|---|
-| Contract ID | 唯一編號，格式 `XXX-0001` |
-| Contract Name | 原始文件名稱 |
-| Company | 所屬公司全稱 |
-| Submit Time | 上傳日期 |
-| Contract Link | Google Drive 直連 |
-| Contract Excerpt | 合約前 300 字摘要 |
-| File ID | Drive 文件唯一識別碼 |
-| Old Contract ID | AI 偵測的舊合約編號 |
-
-**隱藏表 `_FullTextData`**：儲存每份合約完整提取文字，供 AI 全文搜索使用
-
-**隱藏表 `_CompanyMap`**：公司全稱 ↔ 內部代碼對照（如 `FM Event Limited → FME`）
+- **Auto Contract ID:**
+  - Company codes derived from name initials (with Chinese pinyin initial support and collision resolution)
+  - Sequential numbering per company (`FME-0001`, `FME-0002`, etc.)
+  - Live preview shown before upload
 
 ---
 
-## 部署方式
+## Technical Challenges
 
-1. 前往 [Google Apps Script](https://script.google.com)，建立新專案
-2. 將 `ContractSystem_v2.gs` 的內容貼入編輯器
-3. 填入以下四項設定：
+- **Gemini rate limits on a corporate Google Workspace account:** Free-tier quotas were near zero for most models (`gemini-2.0-flash`, `gemini-1.5-flash`). Diagnosed by testing four models individually; only `gemini-flash-latest` returned HTTP 200. RAG pre-filtering also reduced the number of API calls needed per query.
 
-```javascript
-var ROOT_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID';  // Google Drive 根資料夾 ID
-var SHEET_ID       = 'YOUR_GOOGLE_SHEET_ID';          // Google Sheets 試算表 ID
-var SITE_PASSWORD  = 'YOUR_SITE_PASSWORD';             // 自訂網頁密碼
-var GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';            // 前往 Google AI Studio 申請
+- **Deployed web app showing 404 while direct function test showed 200:** The web app was serving a cached old deployment version. Identified that Apps Script requires explicitly selecting "New Version" in Manage Deployments — redeploying with the same version does not update the live URL.
+
+- **Backfill function with no visible progress:** Original implementation used an unconditional 5-second sleep and batched all writes at the end, making it appear to hang. Refactored to write each cell immediately after the AI call, added strict skip logic for non-empty cells, and set a 4.3-minute safety timeout (under Apps Script's 6-minute execution limit) so the function can be re-run incrementally.
+
+- **AI responses containing raw Unicode separator characters:** Gemini occasionally returned `─────────` separator lines in its output. Added a regex filter to strip lines consisting entirely of Unicode box-drawing or dash characters before rendering the HTML response.
+
+---
+
+## Key Features
+
+- Multi-condition contract search: Contract ID (new or old), company, and full-text keyword
+- One-click Drive sync: scans for newly added and trashed files, updates the index
+- Upload with automatic ID assignment and AI-extracted legacy contract number
+- AI assistant with two-layer RAG search and clickable contract links in responses
+- Spreadsheet-side menu tools: sync, backfill old IDs, clean up deleted records
+- Local Python scripts for pre-processing and classifying contracts in bulk before system import
+
+---
+
+## Tools & Technologies
+
+- **Backend:** Google Apps Script (serverless)
+- **Frontend:** HTML / CSS / JavaScript (embedded)
+- **Database:** Google Sheets
+- **File Storage:** Google Drive
+- **AI:** Gemini API (`gemini-flash-latest`)
+- **Text Extraction:** Google Drive OCR (PDF / Word to Google Docs)
+- **Caching:** Apps Script CacheService (full-text map, 5-minute TTL)
+- **Local Preprocessing:** Python, pdfplumber, python-docx, openpyxl
+
+---
+
+## Project Structure
+
+```
+contract-management-system/
+├── ContractSystem_v2.gs        Main Apps Script file — UI, backend logic, AI integration
+├── classify_by_content.py      Local script: classify unindexed contracts by content keyword
+├── process_contracts.py        Local script: batch scan PDF/Word files and export an Excel list
+├── requirements.txt
+└── README.md
 ```
 
-4. 在 Apps Script 左側啟用兩個服務：**Drive API v3**、**Sheets API v4**
-5. 點擊「部署 → 新增部署項目 → 網頁應用程式」，存取權設為「所有人」
-6. 複製部署 URL 即可使用
+---
 
-> **API Key 申請**：前往 [Google AI Studio](https://aistudio.google.com/apikey) 免費申請 Gemini API Key
+## Deployment
+
+1. Open [Google Apps Script](https://script.google.com) and create a new project
+2. Paste the contents of `ContractSystem_v2.gs` into the editor
+3. Fill in the four config variables at the top of the file:
+
+```javascript
+var ROOT_FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID';
+var SHEET_ID       = 'YOUR_GOOGLE_SHEET_ID';
+var SITE_PASSWORD  = 'YOUR_SITE_PASSWORD';
+var GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';  // https://aistudio.google.com/apikey
+```
+
+4. Enable two services under **Services**: Drive API v3, Sheets API v4
+5. Click **Deploy > New deployment > Web app**, set access to "Anyone"
+6. Copy the deployment URL
+
+To bind the spreadsheet menu tools (`onOpen`, `syncAll`, etc.), open the target Google Sheet, go to **Extensions > Apps Script**, and paste the same file there.
 
 ---
 
-## 試算表選單工具
-
-開啟綁定的 Google Sheets 後，頂部選單會出現「合同工具」：
-
-- **立即同步**：新增 + 刪除一次完成
-- **補全舊 ID**：AI 逐份偵測空白欄位，每次最多處理 15 份（可重複執行直到完成）
-- **清理已刪除**：只移除已移至垃圾桶的記錄
-
----
-
-## 輔助腳本（本地預處理）
-
-| 檔案 | 說明 |
-|---|---|
-| `process_contracts.py` | 本地批量掃描 PDF / Word，匯出 Excel 清單 |
-| `classify_by_content.py` | 依合約內容關鍵字自動分類未歸檔文件 |
+## Local Preprocessing Scripts
 
 ```bash
 pip install -r requirements.txt
-python process_contracts.py
+python process_contracts.py       # Scan local folder, export Excel list
+python classify_by_content.py     # Classify unindexed files by content keyword
 ```
