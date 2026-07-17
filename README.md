@@ -1,71 +1,73 @@
+### Internal tool — no public demo (operates on live company contract data)
+
+---
+
 ## Project Overview
 
-This is an **internal contract management system** developed independently as a personal work output for my employer.
+This project is an **internal contract management system** built independently as a personal work output for my employer, currently in active use.
 
-The system provides a serverless, password-protected web interface for uploading, indexing, and searching company contracts, with an AI assistant for natural-language queries. All data lives in Google Workspace — no external server required.
+The system replaces a manual folder-and-spreadsheet workflow with a password-protected web application for uploading, indexing, and searching company contracts, plus an AI assistant that answers natural-language questions grounded in the contract text itself. It runs entirely on Google Workspace — Apps Script as the backend, Sheets as the database, Drive as file storage — so there is no server to host or pay for.
 
-Built end to end as a solo project: system architecture, AI integration, RAG pipeline, frontend UI, and deployment.
+Built solo end to end: architecture, RAG pipeline, AI integration, frontend UI, and deployment.
 
 ---
 
 ## Approach & Methods
 
 - **Storage & Database:**
-  - Contracts stored in Google Drive, organized by company folder
-  - Google Sheets used as the database (main table, full-text index, company code map)
-  - Text extracted from PDF and Word files via Google Drive OCR (converting to Google Docs and reading the body text)
+  - Contracts stored in Google Drive, organized into per-company folders created automatically on first upload
+  - Google Sheets used as the database across three tables: a main index, a hidden full-text store (`_FullTextData`), and a company-to-code map (`_CompanyMap`)
+  - Text extracted from PDF and Word files by converting each to a temporary Google Doc via the Drive API and reading the body, then trashing the temp file
 
-- **AI Integration (RAG):**
-  - Implemented a two-layer retrieval pipeline before passing context to Gemini
-  - Layer 1: keyword match against structured fields (Contract ID, company name, date, old ID)
-  - Layer 2: keyword match against full extracted text cached in a hidden sheet (`_FullTextData`)
-  - Matched contracts (up to 5, 1500 chars each) sent as context to Gemini; responses include clickable Drive links
-
-- **Web Interface:**
-  - Full HTML/CSS/JS UI embedded in a single Apps Script `doGet()` function
-  - Three-tab layout: Search/Sync, Upload/File, AI Assistant
-  - Left-side slide-out documentation panel that does not overlay the main content
-  - Password gate before the main interface
+- **Retrieval (RAG):**
+  - Two-layer local retrieval runs before any AI call, so the model only ever sees relevant contracts
+  - Layer 1 matches query keywords against structured fields (Contract ID, company, year, legacy ID)
+  - Layer 2 matches against the full extracted text of every contract
+  - The union of both layers is capped at 5 contracts x 1500 characters and passed to Gemini as context; the model is instructed to return each contract as a clickable Drive link
 
 - **Auto Contract ID:**
-  - Company codes derived from name initials (with Chinese pinyin initial support and collision resolution)
-  - Sequential numbering per company (`FME-0001`, `FME-0002`, etc.)
-  - Live preview shown before upload
+  - Company codes derived from name initials, with Chinese pinyin-initial support and automatic collision resolution
+  - Per-company sequential numbering (`FME-0001`, `FME-0002`) computed from the existing index
+  - Next ID previewed live in the upload form before the file is submitted, and overridable by hand
+
+- **Web Interface:**
+  - Full HTML/CSS/JS UI served from a single Apps Script `doGet()`, embeddable in an iframe on the company site
+  - Three tabs: Search/Sync, Upload/File, AI Assistant, behind a password gate
+  - Slide-out documentation panel sized with `calc()` to occupy only the empty left gutter, so it never overlays the main content
 
 ---
 
 ## Technical Challenges
 
-- **Gemini rate limits on a corporate Google Workspace account:** Free-tier quotas were near zero for most models (`gemini-2.0-flash`, `gemini-1.5-flash`). Diagnosed by testing four models individually; only `gemini-flash-latest` returned HTTP 200. RAG pre-filtering also reduced the number of API calls needed per query.
+- **Working within a 6-minute execution ceiling:** Apps Script kills any function that runs past six minutes, but backfilling legacy IDs across the full archive requires one AI call per contract plus rate-limit backoff — far beyond that budget. Designed the backfill as a resumable incremental job: it writes each cell immediately rather than batching at the end, skips any row already filled, and exits cleanly at 4.3 minutes with a progress log. Re-running it simply picks up where it stopped, so an arbitrarily long job completes across however many runs it needs, and a mid-run failure never loses completed work.
 
-- **Deployed web app showing 404 while direct function test showed 200:** The web app was serving a cached old deployment version. Identified that Apps Script requires explicitly selecting "New Version" in Manage Deployments — redeploying with the same version does not update the live URL.
+- **Near-zero Gemini quota on a corporate Workspace account:** The account returned HTTP 429 with a quota limit of 0 for most models, and 404 for others. Wrote a diagnostic that probes each candidate model independently and logs status plus error body, which isolated `gemini-flash-latest` as the only model the account could actually reach — a fact no error message stated directly. Since that model carries a 20-request/day free tier, the RAG pre-filter became a hard requirement rather than an optimization: sending the whole archive per query was never viable.
 
-- **Backfill function with no visible progress:** Original implementation used an unconditional 5-second sleep and batched all writes at the end, making it appear to hang. Refactored to write each cell immediately after the AI call, added strict skip logic for non-empty cells, and set a 4.3-minute safety timeout (under Apps Script's 6-minute execution limit) so the function can be re-run incrementally.
-
-- **AI responses containing raw Unicode separator characters:** Gemini occasionally returned `─────────` separator lines in its output. Added a regex filter to strip lines consisting entirely of Unicode box-drawing or dash characters before rendering the HTML response.
+- **Google Sheets as a database under read pressure:** Full-text search reads every contract's extracted text, which meant re-pulling the entire hidden sheet on each query and on every backfill row. Cached the full-text map in `CacheService` with a 5-minute TTL, collapsing repeated full-sheet reads within a session down to one.
 
 ---
 
 ## Key Features
 
-- Multi-condition contract search: Contract ID (new or old), company, and full-text keyword
-- One-click Drive sync: scans for newly added and trashed files, updates the index
+- Multi-condition search across Contract ID (current or legacy), company, and full contract text
+- One-click Drive sync that indexes newly added files and prunes trashed ones in a single pass
 - Upload with automatic ID assignment and AI-extracted legacy contract number
-- AI assistant with two-layer RAG search and clickable contract links in responses
-- Spreadsheet-side menu tools: sync, backfill old IDs, clean up deleted records
-- Local Python scripts for pre-processing and classifying contracts in bulk before system import
+- AI assistant with two-layer RAG retrieval, returning clickable Drive links to matched contracts
+- Spreadsheet menu tools for sync, resumable legacy-ID backfill, and cleanup of deleted records
+- Built-in slide-out user manual covering Drive layout, sheet schema, and every UI action
+- Local Python scripts for bulk classification and inventory of the existing archive prior to import
 
 ---
 
 ## Tools & Technologies
 
 - **Backend:** Google Apps Script (serverless)
-- **Frontend:** HTML / CSS / JavaScript (embedded)
-- **Database:** Google Sheets
-- **File Storage:** Google Drive
-- **AI:** Gemini API (`gemini-flash-latest`)
-- **Text Extraction:** Google Drive OCR (PDF / Word to Google Docs)
-- **Caching:** Apps Script CacheService (full-text map, 5-minute TTL)
+- **Frontend:** HTML / CSS / JavaScript (embedded, no framework)
+- **Database:** Google Sheets (Sheets API v4)
+- **File Storage:** Google Drive (Drive API v3)
+- **AI:** Google Gemini (`gemini-flash-latest`)
+- **Text Extraction:** Drive-side conversion to Google Docs
+- **Caching:** Apps Script CacheService (5-minute TTL)
 - **Local Preprocessing:** Python, pdfplumber, python-docx, openpyxl
 
 ---
@@ -74,12 +76,51 @@ Built end to end as a solo project: system architecture, AI integration, RAG pip
 
 ```
 contract-management-system/
-├── ContractSystem_v2.gs        Main Apps Script file — UI, backend logic, AI integration
-├── classify_by_content.py      Local script: classify unindexed contracts by content keyword
-├── process_contracts.py        Local script: batch scan PDF/Word files and export an Excel list
+├── ContractSystem_v2.gs        Apps Script application (single-file deployment)
+├── classify_by_content.py      Local: classify unindexed contracts by content keyword
+├── process_contracts.py        Local: batch scan PDF/Word files and export an Excel inventory
 ├── requirements.txt
 └── README.md
 ```
+
+Apps Script deploys as a flat file, so `ContractSystem_v2.gs` is organized into sections:
+
+```
+ContractSystem_v2.gs
+├── Config                      Drive/Sheet IDs, password, API key
+├── Helpers
+│   ├── getCodeMap()            Company to code map, seeded on first run
+│   ├── generateUniqueCode()    Initials-based code with collision resolution
+│   ├── getChineseInitial()     Pinyin initial for Chinese company names
+│   └── buildSeqMap()           Highest sequence number per company code
+├── AI
+│   ├── testGeminiApi()         Diagnostic: probe each model, log status
+│   ├── aiExtractOldId()        Extract legacy contract number from text
+│   └── chatWithAI()            Two-layer RAG retrieval, then Gemini call
+├── Web app
+│   ├── doGet()                 Serves the full UI (tabs, manual panel, password gate)
+│   ├── checkPassword()         Password gate
+│   ├── searchContractsWeb()    Multi-condition search
+│   ├── uploadFileWeb()         Upload, extract, AI-tag, index
+│   ├── getPreviewContractId()  Live next-ID preview
+│   └── syncAllWeb()            Sync entry point for the web UI
+├── Sync
+│   ├── scanAndFillContracts()  Index new Drive files
+│   ├── scanFolderRecursive()   Recursive walk with time budget
+│   ├── removeDeletedFiles()    Prune trashed files from both sheets
+│   └── backfillOldContractIds()  Resumable AI backfill of legacy IDs
+└── onOpen()                    Spreadsheet menu registration
+```
+
+---
+
+## Screenshots
+
+<!-- Add screenshots to docs/ and uncomment:
+![Search interface](./docs/screenshot-search.png)
+![Upload and filing](./docs/screenshot-upload.png)
+![AI assistant](./docs/screenshot-ai.png)
+-->
 
 ---
 
@@ -96,11 +137,14 @@ var SITE_PASSWORD  = 'YOUR_SITE_PASSWORD';
 var GEMINI_API_KEY = 'YOUR_GEMINI_API_KEY';  // https://aistudio.google.com/apikey
 ```
 
-4. Enable two services under **Services**: Drive API v3, Sheets API v4
-5. Click **Deploy > New deployment > Web app**, set access to "Anyone"
-6. Copy the deployment URL
+4. Under **Services**, add Drive API v3 and Sheets API v4
+5. Deploy via **Deploy > New deployment > Web app**, with access set to "Anyone"
 
-To bind the spreadsheet menu tools (`onOpen`, `syncAll`, etc.), open the target Google Sheet, go to **Extensions > Apps Script**, and paste the same file there.
+The hidden `_FullTextData` and `_CompanyMap` sheets are created automatically on first run.
+
+> Apps Script serves the deployment version, not the editor's current code. After any edit, redeploy with **Manage deployments > Edit > Version > New version** — reusing the existing version leaves the live URL running the old code.
+
+To enable the spreadsheet menu tools, bind the same file to the target sheet via **Extensions > Apps Script**.
 
 ---
 
@@ -108,6 +152,6 @@ To bind the spreadsheet menu tools (`onOpen`, `syncAll`, etc.), open the target 
 
 ```bash
 pip install -r requirements.txt
-python process_contracts.py       # Scan local folder, export Excel list
+python process_contracts.py       # Scan a local folder, export an Excel inventory
 python classify_by_content.py     # Classify unindexed files by content keyword
 ```
