@@ -1,0 +1,20 @@
+# 本地設定（含真實 ID 與密碼，不納入版本控制）
+config.local.gs
+*.local.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# 本地處理產出
+*.xlsx
+*.csv
+output/
+temp/
+
+# macOS
+.DS_Store
