@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-This project is an **internal contract management system** built independently as a personal work output for my employer, currently in active use.
+This project is an **internal contract management system** built independently as a personal work output for my employer between **June 2026 and July 2026**, currently in active use.
 
 The system replaces a manual folder-and-spreadsheet workflow with a password-protected web application for uploading, indexing, and searching company contracts, plus an AI assistant that answers natural-language questions grounded in the contract text itself. It runs entirely on Google Workspace — Apps Script as the backend, Sheets as the database, Drive as file storage — so there is no server to host or pay for.
 
