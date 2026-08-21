@@ -209,7 +209,7 @@ function doGet(e) {
 
     + '  <div class="sb-sec"><h4>🔰 系統概覽</h4>'
     + '  <p>本系統整合 <b>Google Drive</b> 雲端存檔、<b>Google Sheets</b> 資料庫與 <b>Gemini AI</b>，提供合約的上傳、搜索及智能問答。</p>'
-    + '  <p><b>系統密碼：</b>27302666</p></div>'
+    + '  <p><b>系統密碼：</b>請向系統管理員索取</p></div>'
 
     + '  <div class="sb-sec"><h4>📁 Google Drive 結構</h4><ul>'
     + '  <li>根目錄下按<b>公司名稱</b>分設子資料夾</li>'
